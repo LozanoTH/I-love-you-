@@ -1,0 +1,147 @@
+<!doctype html>
+
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prueba Fake Camera / getUserMedia</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:18px;color:#111}
+    h1{font-size:18px;margin-bottom:6px}
+    p{margin:6px 0 12px;color:#333}
+    video{background:#000;width:640px;height:480px;display:block}
+    #thumbs img{width:160px;height:120px;object-fit:cover;margin:6px;border:1px solid #ccc}
+    button{margin:6px 8px 6px 0;padding:8px 12px}
+    #log{white-space:pre-wrap;background:#f6f6f6;padding:8px;border:1px solid #e1e1e1;max-height:160px;overflow:auto}
+    .small{font-size:13px;color:#666}
+  </style>
+</head>
+<body>
+  <h1>Prueba: cámara real / fake (stream desde imágenes)</h1>
+  <p class="small">Abre esta página desde <strong>http(s)</strong>. Usa tu userscript para interceptar <code>getUserMedia</code> o prueba la cámara real.</p>  <div>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" width="640" height="480" style="display:none"></canvas>
+  </div>  <div style="margin-top:10px">
+    <button id="btnCamera">Solicitar cámara (real)</button>
+    <button id="btnCapture">Capturar 5 fotos (del stream)</button>
+    <button id="btnPicsum">Capturar 5 fotos (API random)</button>
+    <button id="btnStop">Detener stream</button>
+  </div>  <div style="margin-top:12px">
+    <strong>Miniaturas:</strong>
+    <div id="thumbs"></div>
+  </div>  <h3>Log</h3>
+  <div id="log"></div>  <script>
+    // Variables
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const thumbs = document.getElementById('thumbs');
+    const logEl = document.getElementById('log');
+    let currentStream = null;
+
+    function log(msg){
+      const t = new Date().toLocaleTimeString();
+      logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
+    }
+
+    async function startCamera(){
+      stopStream();
+      try{
+        const s = await navigator.mediaDevices.getUserMedia({ video: { width:640, height:480 }, audio: false });
+        currentStream = s;
+        video.srcObject = s;
+        log('Stream obtenido. Pistas: ' + s.getVideoTracks().length);
+      } catch(err){
+        log('Error getUserMedia: ' + (err && err.message));
+      }
+    }
+
+    function stopStream(){
+      if(currentStream){
+        currentStream.getTracks().forEach(t=>t.stop());
+        currentStream = null;
+        video.srcObject = null;
+        log('Stream detenido');
+      }
+    }
+
+    function captureFromVideo(){
+      if(!video.srcObject){ log('No hay stream activo'); return null; }
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      return canvas.toDataURL('image/jpeg',0.7);
+    }
+
+    async function captureNFromStream(n=5, delay=300){
+      thumbs.innerHTML = '';
+      for(let i=0;i<n;i++){
+        const data = captureFromVideo();
+        if(!data){ log('Captura fallida'); break; }
+        addThumb(data, `capture_${i+1}.jpg`);
+        log('Foto capturada del stream: ' + (i+1));
+        await new Promise(r=>setTimeout(r, delay));
+      }
+    }
+
+    // Capturar usando API random (picsum). No requiere permisos de cámara.
+    async function captureNFromPicsum(n=5){
+      thumbs.innerHTML = '';
+      for(let i=0;i<n;i++){
+        try{
+          const w = 640, h = 480;
+          const url = `https://picsum.photos/${w}/${h}?random=${Math.floor(Math.random()*1e9)}`;
+          const r = await fetch(url, { cache: 'no-store' });
+          const blob = await r.blob();
+          const dataUrl = await blobToDataURL(blob);
+          addThumb(dataUrl, `picsum_${i+1}.jpg`);
+          log('Foto descargada desde API: ' + url);
+        } catch(e){
+          log('Error al descargar imagen: ' + (e && e.message));
+        }
+        await new Promise(r=>setTimeout(r, 300));
+      }
+    }
+
+    function blobToDataURL(blob){
+      return new Promise((res,rej)=>{
+        const fr = new FileReader();
+        fr.onload = ()=>res(fr.result);
+        fr.onerror = rej;
+        fr.readAsDataURL(blob);
+      });
+    }
+
+    function addThumb(dataUrl, filename){
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.title = filename;
+      img.addEventListener('click', ()=>{
+        // abrir en nueva pestaña
+        const w = window.open('about:blank');
+        w.document.write(`<img src="${dataUrl}" style="max-width:100%">`);
+      });
+      thumbs.appendChild(img);
+
+      // link de descarga
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      a.textContent = '↓';
+      a.style.marginLeft = '4px';
+      a.style.fontSize = '12px';
+      thumbs.appendChild(a);
+    }
+
+    // Botones
+    document.getElementById('btnCamera').addEventListener('click', startCamera);
+    document.getElementById('btnStop').addEventListener('click', stopStream);
+    document.getElementById('btnCapture').addEventListener('click', ()=>captureNFromStream(5, 250));
+    document.getElementById('btnPicsum').addEventListener('click', ()=>captureNFromPicsum(5));
+
+    // Nota: esta página está pensada para pruebas. Si instalas tu userscript que intercepta
+    // getUserMedia, al pulsar "Solicitar cámara" el sitio recibirá el stream modificado.
+
+    log('Página lista. Pulsa "Solicitar cámara" o "Capturar 5 fotos (API random)".');
+  </script></body>
+</html>
